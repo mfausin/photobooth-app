@@ -1,15 +1,20 @@
 import logging
 import os
+import threading
 import time
+from collections import deque
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import gphoto2 as gp
 
+from ...utils.exceptions import BackendNotRunning
 from ...utils.helper import filename_str_time
 from ..config.groups.cameras import Gphoto2Parameters, GroupCameraGphoto2
 from .abstractbackend import AbstractBackend, StillRequest
+from .gphoto2_config import Gphoto2CameraConfig, camera_config_from_widget
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +47,27 @@ assert {e.name: e.value for e in GpWidgets} == {name: getattr(gp, name) for name
 assert {e.name: e.value for e in GpEvents} == {name: getattr(gp, name) for name in GpEvents.__members__}, "GP_EVENT are inconsistent"
 
 
+@dataclass
+class ConfigReadRequest:
+    done: threading.Event = field(default_factory=threading.Event)
+    result: Gphoto2CameraConfig | None = None
+    error: Exception | None = None
+
+
+def read_camera_config_once() -> Gphoto2CameraConfig:
+    """Read the config of the first detected camera directly. Only use it if no gphoto2 backend holds the camera."""
+    camera = gp.Camera()  # pyrefly: ignore [missing-attribute]
+    try:
+        camera.init()
+    except gp.GPhoto2Error as exc:
+        raise ConnectionError(f"Could not connect to camera, error: {exc}") from exc
+
+    try:
+        return camera_config_from_widget(camera.get_config())
+    finally:
+        camera.exit()
+
+
 class Gphoto2Backend(AbstractBackend):
     def __init__(self, config: GroupCameraGphoto2):
         self._config: GroupCameraGphoto2 = config
@@ -56,6 +82,9 @@ class Gphoto2Backend(AbstractBackend):
 
         self._camera = gp.Camera()  # pyrefly: ignore [missing-attribute]
         self._camera_context = gp.Context()
+
+        # requests to read the camera config, processed by the service thread which owns the camera
+        self._config_read_requests: deque[ConfigReadRequest] = deque()
 
         logger.info(f"python-gphoto2: {gp.__version__}")
         logger.info(f"libgphoto2: {gp.gp_library_version(gp.GP_VERSION_VERBOSE)}")  # pyrefly: ignore [missing-attribute]
@@ -148,6 +177,41 @@ class Gphoto2Backend(AbstractBackend):
             logger.exception(exc)
             raise RuntimeError(f"Cannot set '{name}' to '{value_new}'! Command ignored. Error: {exc}") from exc
 
+    def read_camera_config(self, timeout: float = 10.0) -> Gphoto2CameraConfig:
+        """Read the configuration (parameters, values and choices) of the connected camera.
+
+        The camera is only accessed by the service thread, so the request is handed over and processed between frames.
+        """
+        if not self._running:
+            raise BackendNotRunning("camera is not connected")
+
+        req = ConfigReadRequest()
+        self._config_read_requests.append(req)
+
+        if not req.done.wait(timeout):
+            try:
+                self._config_read_requests.remove(req)
+            except ValueError:
+                pass  # already taken by the service thread
+            raise TimeoutError("camera did not respond in time")
+
+        if req.error:
+            raise req.error
+
+        assert req.result
+        return req.result
+
+    def _process_config_read_requests(self):
+        while self._config_read_requests:
+            req = self._config_read_requests.popleft()
+            try:
+                req.result = camera_config_from_widget(self._camera.get_config())
+            except Exception as exc:
+                logger.warning(f"could not read camera config: {exc}")
+                req.error = exc
+            finally:
+                req.done.set()
+
     def setup_resource(self):
         assert gp
 
@@ -177,6 +241,12 @@ class Gphoto2Backend(AbstractBackend):
                 print()
 
     def teardown_resource(self):
+        # answer pending config requests, the camera is gone
+        while self._config_read_requests:
+            req = self._config_read_requests.popleft()
+            req.error = BackendNotRunning("camera disconnected")
+            req.done.set()
+
         if self._camera:
             self._camera.exit()
 
@@ -186,6 +256,8 @@ class Gphoto2Backend(AbstractBackend):
         preview_failcounter = 0
 
         while not self._stop_event.is_set():  # repeat until stopped
+            self._process_config_read_requests()
+
             with self._hires_lock:
                 req = self._hires_queue.popleft() if self._hires_queue else None
 

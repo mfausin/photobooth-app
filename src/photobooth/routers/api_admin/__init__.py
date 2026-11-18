@@ -3,10 +3,11 @@
 from fastapi import APIRouter, Depends
 
 from ..auth_dependencies_bearer import get_current_active_user
-from . import auth, config, enumerate, files, information, multicamera, share
+from . import auth, cameras, config, enumerate, files, information, multicamera, share
 
 __all__ = [
     "auth",
+    "cameras",
     "config",  # refers to the 'config.py' file
     "enumerate",
     "files",
@@ -17,6 +18,7 @@ __all__ = [
 
 router = APIRouter(prefix="/api/admin")
 router.include_router(auth.router)
+router.include_router(cameras.router, dependencies=[Depends(get_current_active_user)])
 router.include_router(config.router, dependencies=[Depends(get_current_active_user)])
 router.include_router(enumerate.router, dependencies=[Depends(get_current_active_user)])
 router.include_router(files.router, dependencies=[Depends(get_current_active_user)])

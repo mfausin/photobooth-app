@@ -23,19 +23,22 @@ class AcquisitionService(BaseService):
         super().__init__()
 
         self._backends: list[AbstractBackend] = []
+        self._backends_by_config_index: dict[int, AbstractBackend] = {}
         self._recorder: SoftwareVideoRecorder | None = None
 
     def start(self):
         super().start()
 
         self._backends = []
+        self._backends_by_config_index = {}
 
         # get backend obj and instanciate
-        for cfg in appconfig.cameras.group_backends:
+        for config_index, cfg in enumerate(appconfig.cameras.group_backends):
             if cfg.enabled:
                 backend: AbstractBackend = self._import_backend(cfg.backend_config.backend_type)(cfg.backend_config)
 
                 self._backends.append(backend)
+                self._backends_by_config_index[config_index] = backend
             else:
                 logger.info(f"skipped starting backend {cfg} because not enabled")
 
@@ -81,6 +84,13 @@ class AcquisitionService(BaseService):
             return self._backends[index]
         except IndexError:
             raise RuntimeError(f"illegal configuration, cannot get backend {index=} for {index_type}") from None
+
+    def get_backend_by_config_index(self, config_index: int) -> AbstractBackend | None:
+        """Backend instance created for appconfig.cameras.group_backends[config_index], None if it is not enabled."""
+        return self._backends_by_config_index.get(config_index)
+
+    def get_backends(self) -> list[AbstractBackend]:
+        return list(self._backends)
 
     def stats(self):
         """

@@ -144,3 +144,19 @@ def test_get_gphoto2_info():
     logger.info(f"python-gphoto2: {gp.__version__}")
     logger.info(f"libgphoto2: {gp.gp_library_version(gp.GP_VERSION_VERBOSE)}")  # pyrefly: ignore [missing-attribute]
     logger.info(f"libgphoto2_port: {gp.gp_port_library_version(gp.GP_VERSION_VERBOSE)}")  # pyrefly: ignore [missing-attribute]
+
+
+def test_get_gphoto2_read_camera_config(backend_gphoto2: Gphoto2Backend):
+    config = backend_gphoto2.read_camera_config()
+
+    names = [widget.name for widget in config.widgets]
+    assert "capturetarget" in names
+    assert "shutterspeed" in names
+
+    shutterspeed = next(widget for widget in config.widgets if widget.name == "shutterspeed")
+    assert shutterspeed.settable
+    assert shutterspeed.value in shutterspeed.choices
+
+    # the backend keeps working after a config read
+    with Image.open(backend_gphoto2.wait_for_still_file()) as img:
+        img.verify()
