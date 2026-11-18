@@ -160,6 +160,19 @@ class GroupCameraGphoto2(BaseModelCamera):
     model_config = ConfigDict(title="Gphoto2")
     backend_type: Literal["Gphoto2"] = "Gphoto2"
 
+    parameter_configuration: Literal["manual", "camera"] = Field(
+        default="manual",
+        description="How the parameter sets are configured. 'manual': enter names and values of the parameters yourself. "
+        "'camera': read the available parameters and values from the connected camera and choose them in the admin UI "
+        "(camera needs to be connected while configuring). The parameter sets are applied the same way in both cases.",
+    )
+    camera_mode_at_configuration: str = Field(
+        default="",
+        description="Exposure mode of the camera when the parameter sets were chosen from the camera, as 'name=value' "
+        "(e.g. 'autoexposuremode=Manual'). Set by the admin UI. The available values depend on the mode, so the app warns "
+        "if the camera is in a different mode.",
+    )
+
     parameterset_device_init: list[Gphoto2Parameters] = Field(
         default=[
             Gphoto2Parameters(name="capturetarget", value="", enabled=False),

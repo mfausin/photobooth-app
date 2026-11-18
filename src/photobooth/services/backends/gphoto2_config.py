@@ -149,3 +149,21 @@ def camera_config_from_widget(root: _Widget) -> Gphoto2CameraConfig:
             break
 
     return Gphoto2CameraConfig(model=model, mode=mode, widgets=widgets)
+
+
+def camera_mode_mismatch(camera_mode_at_configuration: str, config: Gphoto2CameraConfig) -> str | None:
+    """Describe the difference if the camera is not in the mode the parameter sets were chosen in, else None.
+
+    camera_mode_at_configuration is 'name=value' as stored in the config, empty if unknown.
+    """
+    if not camera_mode_at_configuration:
+        return None
+
+    name, _, value = camera_mode_at_configuration.partition("=")
+    current = next((widget for widget in config.widgets if widget.name == name), None)
+
+    if current is None:
+        return f"the parameter sets were chosen with {name}={value}, but the camera does not report '{name}' now"
+    if current.value != value:
+        return f"the parameter sets were chosen with {name}={value}, but the camera is in {name}={current.value} now"
+    return None

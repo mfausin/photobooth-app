@@ -14,7 +14,7 @@ from ...utils.exceptions import BackendNotRunning
 from ...utils.helper import filename_str_time
 from ..config.groups.cameras import Gphoto2Parameters, GroupCameraGphoto2
 from .abstractbackend import AbstractBackend, StillRequest
-from .gphoto2_config import Gphoto2CameraConfig, camera_config_from_widget
+from .gphoto2_config import Gphoto2CameraConfig, camera_config_from_widget, camera_mode_mismatch
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +111,21 @@ class Gphoto2Backend(AbstractBackend):
 
     def _handle_switchmode_init(self):
         logger.debug("configure camera during device init")
+        self._warn_if_camera_mode_changed()
         self._handle_switchmode(self._config.parameterset_device_init)
+
+    def _warn_if_camera_mode_changed(self):
+        if self._config.parameter_configuration != "camera" or not self._config.camera_mode_at_configuration:
+            return
+
+        try:
+            mismatch = camera_mode_mismatch(self._config.camera_mode_at_configuration, camera_config_from_widget(self._camera.get_config()))
+        except Exception as exc:
+            logger.debug(f"could not check the camera mode: {exc}")
+            return
+
+        if mismatch:
+            logger.warning(f"Camera mode changed: {mismatch}. Parameters missing in this mode are ignored, check the mode dial.")
 
     def _handle_switchmode_video_mode(self):
         logger.debug("configure camera optimized for video")

@@ -137,3 +137,14 @@ def test_camera_config_mode_priority_and_missing_mode():
     config = camera_config_from_widget(no_mode)
     assert config.mode is None
     assert config.model is None
+
+
+def test_camera_mode_mismatch():
+    from photobooth.services.backends.gphoto2_config import camera_mode_mismatch
+
+    config = camera_config_from_widget(canon_like_tree())  # autoexposuremode=Manual
+
+    assert camera_mode_mismatch("", config) is None
+    assert camera_mode_mismatch("autoexposuremode=Manual", config) is None
+    assert "autoexposuremode=AV" in (camera_mode_mismatch("autoexposuremode=AV", config) or "")
+    assert "does not report 'expprogram'" in (camera_mode_mismatch("expprogram=M", config) or "")
