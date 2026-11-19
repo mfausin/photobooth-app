@@ -215,16 +215,44 @@ class Gphoto2Backend(AbstractBackend):
         assert req.result
         return req.result
 
+    def _camera_still_connected(self) -> bool:
+        """Whether the opened camera is still on the bus.
+
+        In standby the service thread does not talk to the camera, so a camera that was unplugged or switched off is
+        not noticed. libgphoto2 answers get_config from its cache then (Canon EOS), so check the bus before reading.
+        """
+        assert gp
+        try:
+            port = self._camera.get_port_info().get_path()
+        except Exception:
+            return True  # cannot tell, let get_config decide
+        if not port:
+            return True
+
+        detected = gp.Camera.autodetect()  # pyrefly: ignore [missing-attribute]
+        return any(addr == port for _, addr in detected)
+
     def _process_config_read_requests(self):
+        if not self._config_read_requests:
+            return
+
+        connected = self._camera_still_connected()
+
         while self._config_read_requests:
             req = self._config_read_requests.popleft()
             try:
+                if not connected:
+                    raise ConnectionError("camera disconnected or switched off")
                 req.result = camera_config_from_widget(self._camera.get_config())
             except Exception as exc:
                 logger.warning(f"could not read camera config: {exc}")
                 req.error = exc
             finally:
                 req.done.set()
+
+        if not connected:
+            # leave the worker loop, so the supervisor reconnects once the camera is back (new USB address)
+            raise RuntimeError("camera disconnected or switched off, reconnecting")
 
     def setup_resource(self):
         assert gp
